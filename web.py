@@ -3,34 +3,55 @@ import sqlite3
 import pandas as pd
 from datetime import datetime
 
+# Sayfa Yapılandırması
+st.set_page_config(page_title="Çiftlik 360", page_icon="🌾", layout="wide")
+
+def veritabani_baglan_ve_guncelle():
+    baglanti = sqlite3.connect('ciftlik.db')
+    cursor = baglanti.cursor()
+    
+    try:
+        cursor.execute("ALTER TABLE kullanicilar ADD COLUMN gizli_soru TEXT")
+        cursor.execute("ALTER TABLE kullanicilar ADD COLUMN gizli_cevap TEXT")
+    except:
+        pass 
+        
+    try:
+        cursor.execute("ALTER TABLE buzagilar ADD COLUMN kullanici_adi TEXT")
+        cursor.execute("ALTER TABLE yem_gider ADD COLUMN kullanici_adi TEXT")
+        cursor.execute("ALTER TABLE asi_takip ADD COLUMN kullanici_adi TEXT")
+    except:
+        pass 
+        
+    baglanti.commit()
+    return baglanti
+
+conn = veritabani_baglan_ve_guncelle()
+
 # --- ZİYARETÇİ KARTI (SESSION) TANIMLAMA ---
 if 'kullanici' not in st.session_state:
     st.session_state['kullanici'] = None
 
-# --- PROFESYONEL GİRİŞ VE KAYIT PORTALI ---
+# --- PROFESYONEL GİRİŞ, KAYIT VE ŞİFRE YENİLEME PORTALI ---
 if st.session_state['kullanici'] is None:
     st.title("🌾 Çiftlik 360 - Giriş Portalı")
     
-    # Giriş ve Kayıt sekmeleri oluşturuyoruz
-    tab1, tab2 = st.tabs(["Giriş Yap", "Yeni Hesap Oluştur"])
+    tab1, tab2, tab3 = st.tabs(["Giriş Yap", "Yeni Hesap Oluştur", "Şifremi Unuttum"])
     
     with tab1:
         st.subheader("Sisteme Giriş")
         giris_ad = st.text_input("Kullanıcı Adı", key="g_ad")
         giris_sifre = st.text_input("Şifre", type="password", key="g_sifre")
         
-        if st.button("Giriş Yap"):
-            conn = sqlite3.connect('ciftlik.db')
-            c = conn.cursor()
-            # Veritabanında bu isim ve şifre eşleşiyor mu diye bakıyoruz
-            c.execute("SELECT * FROM kullanicilar WHERE kullanici_adi=? AND sifre=?", (giris_ad, giris_sifre))
-            sonuc = c.fetchone()
-            conn.close()
+        if st.button("Giriş Yap", key="giris_btn"):
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM kullanicilar WHERE kullanici_adi=? AND sifre=?", (giris_ad, giris_sifre))
+            sonuc = cursor.fetchone()
             
             if sonuc:
                 st.session_state['kullanici'] = giris_ad
                 st.success(f"Hoş geldin {giris_ad}! İçeri alınıyorsun...")
-                st.rerun() # Sayfayı yeniler ve asıl siteye atar
+                st.rerun()
             else:
                 st.error("Kullanıcı adı veya şifre hatalı! Tekrar dene.")
                 
@@ -39,28 +60,83 @@ if st.session_state['kullanici'] is None:
         kayit_ad = st.text_input("Belirlediğiniz Kullanıcı Adı", key="k_ad")
         kayit_sifre = st.text_input("Belirlediğiniz Şifre", type="password", key="k_sifre")
         
-        if st.button("Kayıt Ol"):
-            if kayit_ad and kayit_sifre:
-                conn = sqlite3.connect('ciftlik.db')
-                c = conn.cursor()
+        st.markdown("---")
+        st.write("**Şifre Yenileme Güvenliği**")
+        
+        # YENİ: Kullanıcının kendi sorusunu yazabilme özelliği eklendi
+        soru_secenekleri = [
+            "İlk evcil hayvanınızın adı?", 
+            "İlkokul öğretmeninizin adı?", 
+            "En sevdiğiniz yemek?", 
+            "Çocukluk lakabınız nedir?",
+            "✍️ Kendi sorumu yazmak istiyorum..."
+        ]
+        secilen_soru = st.selectbox("Bir Gizli Soru Seçin", soru_secenekleri)
+        
+        # Eğer "Kendi sorumu yazmak istiyorum" seçilirse altta yeni bir kutu açılır
+        if secilen_soru == "✍️ Kendi sorumu yazmak istiyorum...":
+            gizli_soru = st.text_input("Kendi Gizli Sorunuzu Yazın", placeholder="Örn: En sevdiğim araba modeli?", key="k_ozel_soru")
+        else:
+            gizli_soru = secilen_soru
+            
+        gizli_cevap = st.text_input("Gizli Cevabınız (Bunu asla unutmayın!)", key="k_cevap")
+        
+        if st.button("Kayıt Ol", key="kayit_btn"):
+            if kayit_ad and kayit_sifre and gizli_soru and gizli_cevap:
+                cursor = conn.cursor()
                 try:
-                    c.execute("INSERT INTO kullanicilar (kullanici_adi, sifre) VALUES (?, ?)", (kayit_ad, kayit_sifre))
+                    cursor.execute("INSERT INTO kullanicilar (kullanici_adi, sifre, gizli_soru, gizli_cevap) VALUES (?, ?, ?, ?)", 
+                                   (kayit_ad, kayit_sifre, gizli_soru, gizli_cevap))
                     conn.commit()
-                    st.success("Hesabın başarıyla açıldı! Yandaki sekmeden giriş yapabilirsin.")
+                    st.success("Hesabın başarıyla açıldı! 'Giriş Yap' sekmesinden girebilirsin.")
                 except sqlite3.IntegrityError:
                     st.error("Bu kullanıcı adı alınmış kral, başka bir tane dene.")
-                conn.close()
             else:
-                st.warning("Kullanıcı adı ve şifre boş bırakılamaz!")
+                st.warning("Lütfen tüm alanları (Gizli soru ve cevap dahil) doldurun!")
                 
-    st.stop() # Giriş yapılmadıysa Python burada durur, senin kodlarına (verilere) inmez!
-# ---------------------------------------------------------
+    with tab3:
+        st.subheader("Şifreni mi Unuttun?")
+        unutulan_ad = st.text_input("Kullanıcı Adınızı Girin", key="u_ad")
+        
+        if unutulan_ad:
+            cursor = conn.cursor()
+            cursor.execute("SELECT gizli_soru, gizli_cevap FROM kullanicilar WHERE kullanici_adi=?", (unutulan_ad,))
+            kullanici_bilgisi = cursor.fetchone()
+            
+            if kullanici_bilgisi:
+                kayitli_soru = kullanici_bilgisi[0]
+                kayitli_cevap = kullanici_bilgisi[1]
+                
+                if kayitli_soru is None:
+                    st.error("Bu hesabın gizli sorusu ayarlanmamış. Lütfen yöneticiye başvurun.")
+                else:
+                    st.info(f"**Güvenlik Sorunuz:** {kayitli_soru}")
+                    girilen_cevap = st.text_input("Cevabınızı Girin", key="u_cevap")
+                    yeni_sifre = st.text_input("Yeni Şifrenizi Belirleyin", type="password", key="u_yeni_sifre")
+                    
+                    if st.button("Şifremi Yenile"):
+                        if girilen_cevap.lower() == kayitli_cevap.lower(): 
+                            cursor.execute("UPDATE kullanicilar SET sifre=? WHERE kullanici_adi=?", (yeni_sifre, unutulan_ad))
+                            conn.commit()
+                            st.success("Şifreniz başarıyla güncellendi! Giriş yapabilirsiniz.")
+                        else:
+                            st.error("Gizli cevabınız yanlış! Şifre sıfırlanamadı.")
+            else:
+                st.warning("Böyle bir kullanıcı adı sistemde bulunamadı.")
+                
+    st.stop() 
 
 # KULLANICI GİRİŞ YAPTIYSA GÖRECEĞİ YAN MENÜ (ÇIKIŞ BUTONU)
 st.sidebar.title(f"👤 {st.session_state['kullanici']}")
 if st.sidebar.button("Çıkış Yap"):
     st.session_state['kullanici'] = None
     st.rerun()
+
+aktif_kullanici = st.session_state['kullanici']
+
+# =========================================================================
+# BURADAN AŞAĞISI SENİN MEVCUT ÇİFTLİK KODLARIN (DOKUNMA)
+# =========================================================================
 
 # BURADAN AŞAĞISI SENİN MEVCUT ÇİFTLİK KODLARIN...
 
